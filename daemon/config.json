@@ -1,0 +1,23 @@
+{
+  "daemon": {
+    "db_path": "anah.db",
+    "log_level": "INFO"
+  },
+  "intervals": {
+    "l1_heartbeat_sec": 15,
+    "l2_check_sec": 30,
+    "l3_check_sec": 45
+  },
+  "thresholds": {
+    "cpu_percent_max": 90,
+    "ram_percent_max": 85,
+    "disk_percent_max": 90,
+    "dns_timeout_sec": 5,
+    "api_ping_timeout_sec": 10
+  },
+  "integrations": [],
+  "notifications": {
+    "enabled": false,
+    "webhook_url": null
+  }
+}
