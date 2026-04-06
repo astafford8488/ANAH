@@ -3,6 +3,9 @@
 import json
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -129,6 +132,13 @@ async def get_goals(limit: int = 30):
     return {"goals": goals}
 
 
+@app.post("/api/goals/{goal_id}/dismiss")
+async def dismiss_goal(goal_id: int):
+    """Dismiss a goal so L5 won't repeat it."""
+    await db.update_goal_status(goal_id, "dismissed")
+    return {"id": goal_id, "status": "dismissed"}
+
+
 @app.get("/api/goal-stats")
 async def get_goal_stats():
     """L5 goal generation statistics."""
@@ -137,6 +147,7 @@ async def get_goal_stats():
             COUNT(*) as total,
             SUM(CASE WHEN status = 'enacted' THEN 1 ELSE 0 END) as enacted,
             SUM(CASE WHEN status = 'proposed' THEN 1 ELSE 0 END) as proposed,
+            SUM(CASE WHEN status = 'dismissed' THEN 1 ELSE 0 END) as dismissed,
             SUM(CASE WHEN source = 'llm' THEN 1 ELSE 0 END) as from_llm,
             SUM(CASE WHEN source = 'pattern_fallback' THEN 1 ELSE 0 END) as from_patterns
         FROM generated_goals
@@ -148,7 +159,8 @@ async def get_goal_stats():
             "total": r["total"] or 0,
             "enacted": r["enacted"] or 0,
             "proposed": r["proposed"] or 0,
+            "dismissed": r["dismissed"] or 0,
             "from_llm": r["from_llm"] or 0,
             "from_patterns": r["from_patterns"] or 0,
         }
-    return {"total": 0, "enacted": 0, "proposed": 0, "from_llm": 0, "from_patterns": 0}
+    return {"total": 0, "enacted": 0, "proposed": 0, "dismissed": 0, "from_llm": 0, "from_patterns": 0}

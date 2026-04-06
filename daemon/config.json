@@ -4,9 +4,9 @@
     "log_level": "INFO"
   },
   "intervals": {
-    "l1_heartbeat_sec": 15,
-    "l2_check_sec": 30,
-    "l3_check_sec": 45
+    "l1_heartbeat_sec": 30,
+    "l2_check_sec": 300,
+    "l3_check_sec": 900
   },
   "thresholds": {
     "cpu_percent_max": 90,

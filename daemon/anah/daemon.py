@@ -4,6 +4,9 @@ import asyncio
 import logging
 import time
 
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 from anah.config import AnahConfig
 from anah.db import Database
 from anah.task_queue import TaskQueue
@@ -12,9 +15,9 @@ from anah.checks import l1_survival, l2_state, l3_ecosystem, l4_performance, l5_
 
 logger = logging.getLogger("anah.daemon")
 
-L4_CHECK_INTERVAL = 45  # Demo: 45s (production: 120s)
-L5_IDLE_CHECK_INTERVAL = 15  # Demo: 15s (production: 60s)
-L5_COOLDOWN = 60  # Demo: 60s (production: 180s)
+L4_CHECK_INTERVAL = 120  # Production: 2min
+L5_IDLE_CHECK_INTERVAL = 60  # Production: 60s
+L5_COOLDOWN = 180  # Production: 3min
 
 
 class AnahDaemon:

@@ -454,15 +454,16 @@ function TaskQueuePanel({ tasks, taskStats, onSubmitTask }) {
   );
 }
 
-function GoalsPanel({ goals, goalStats }) {
+function GoalsPanel({ goals, goalStats, onDismiss }) {
   return (
     <div>
       {/* Goal Stats */}
       {goalStats && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", marginBottom: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px", marginBottom: "20px" }}>
           {[
             { label: "Goals Generated", value: goalStats.total, color: COLORS.purple },
             { label: "Enacted", value: goalStats.enacted, color: COLORS.green },
+            { label: "Dismissed", value: goalStats.dismissed || 0, color: COLORS.red },
             { label: "From LLM", value: goalStats.from_llm, color: COLORS.cyan },
             { label: "From Patterns", value: goalStats.from_patterns, color: COLORS.amber },
           ].map((s) => (
@@ -553,6 +554,20 @@ function GoalsPanel({ goals, goalStats }) {
                       <span style={{ fontSize: "11px", color: COLORS.textDim, fontFamily: "'JetBrains Mono', monospace" }}>
                         {timeAgo(goal.timestamp)}
                       </span>
+                      {goal.status !== "dismissed" && onDismiss && (
+                        <button
+                          onClick={() => onDismiss(goal.id)}
+                          title="Dismiss — L5 won't repeat this goal"
+                          style={{
+                            fontSize: "10px", fontWeight: 600, cursor: "pointer",
+                            background: `${COLORS.red}22`, color: COLORS.red,
+                            border: `1px solid ${COLORS.red}44`, borderRadius: "3px",
+                            padding: "2px 8px", fontFamily: "'JetBrains Mono', monospace",
+                          }}
+                        >
+                          DISMISS
+                        </button>
+                      )}
                     </div>
                   </div>
                   {goal.description && (
@@ -588,8 +603,8 @@ export default function App() {
   const { data: logsData } = usePolling("/health-logs?limit=100");
   const { data: tasksData, refetch: refetchTasks } = usePolling("/tasks?include_done=true&limit=50");
   const { data: taskStats } = usePolling("/task-stats");
-  const { data: goalsData } = usePolling("/goals");
-  const { data: goalStats } = usePolling("/goal-stats");
+  const { data: goalsData, refetch: refetchGoals } = usePolling("/goals");
+  const { data: goalStats, refetch: refetchGoalStats } = usePolling("/goal-stats");
 
   const tabs = [
     { id: "overview", label: "Overview" },
@@ -602,6 +617,16 @@ export default function App() {
   const daemonOnline = hierarchy && hierarchy.levels && hierarchy.levels.some(
     (l) => l.status !== "unknown"
   );
+
+  const handleDismissGoal = async (goalId) => {
+    try {
+      await fetch(`${API_BASE}/goals/${goalId}/dismiss`, { method: "POST" });
+      refetchGoals();
+      refetchGoalStats();
+    } catch (e) {
+      console.error("Failed to dismiss goal:", e);
+    }
+  };
 
   const handleSubmitTask = async (title, priority) => {
     try {
@@ -716,7 +741,7 @@ export default function App() {
         )}
 
         {activeTab === "goals" && (
-          <GoalsPanel goals={goalsData?.goals} goalStats={goalStats} />
+          <GoalsPanel goals={goalsData?.goals} goalStats={goalStats} onDismiss={handleDismissGoal} />
         )}
 
         {activeTab === "tasks" && (
