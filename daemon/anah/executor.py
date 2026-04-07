@@ -2,6 +2,11 @@
 
 Tasks are Python callables registered by name. The executor runs a continuous loop,
 pulling the next highest-priority task and dispatching it to the registered handler.
+
+Supports:
+- Built-in task handlers (health_report, self_diagnostic, cleanup, echo)
+- Hermes Agent delegation for "hermes:" prefixed tasks
+- Human approval gate: configurable per-task-type hold before execution
 """
 
 import asyncio
@@ -12,6 +17,7 @@ from typing import Callable, Awaitable
 
 from anah.db import Database
 from anah.task_queue import TaskQueue
+from anah.hermes_bridge import HermesBridge, HermesConfig
 
 logger = logging.getLogger("anah.executor")
 
@@ -20,13 +26,35 @@ TaskHandler = Callable[[dict], Awaitable[dict | None]]
 
 
 class TaskExecutor:
-    def __init__(self, db: Database, queue: TaskQueue, poll_interval: float = 5.0):
+    def __init__(
+        self,
+        db: Database,
+        queue: TaskQueue,
+        poll_interval: float = 5.0,
+        hermes_config: HermesConfig | None = None,
+        approval_config: dict | None = None,
+    ):
         self.db = db
         self.queue = queue
         self.poll_interval = poll_interval
         self.running = False
         self._handlers: dict[str, TaskHandler] = {}
         self._current_task: dict | None = None
+
+        # Hermes Agent bridge
+        self.hermes = HermesBridge(hermes_config or HermesConfig())
+        self._hermes_task_types = set(
+            (hermes_config.task_types if hermes_config else [])
+        )
+
+        # Approval gate config
+        self._approval_enabled = False
+        self._require_approval: set[str] = set()
+        self._auto_approve: set[str] = set()
+        if approval_config:
+            self._approval_enabled = approval_config.get("enabled", False)
+            self._require_approval = set(approval_config.get("require_approval", []))
+            self._auto_approve = set(approval_config.get("auto_approve", []))
 
         # Register built-in task types
         self._register_builtins()
@@ -42,6 +70,7 @@ class TaskExecutor:
         self.register("self_diagnostic", self._handle_self_diagnostic)
         self.register("cleanup", self._handle_cleanup)
         self.register("echo", self._handle_echo)
+        self.register("hermes", self._handle_hermes)
 
     async def start(self):
         """Start the executor loop."""
@@ -61,6 +90,17 @@ class TaskExecutor:
         self.running = False
         logger.info("Task Executor stopping")
 
+    def _needs_approval(self, task_type: str) -> bool:
+        """Check if a task type requires human approval before execution."""
+        if not self._approval_enabled:
+            return False
+        if task_type in self._auto_approve:
+            return False
+        if task_type in self._require_approval:
+            return True
+        # Default: tasks not in either list are auto-approved
+        return False
+
     async def _execute_task(self, task: dict):
         """Execute a single task."""
         task_id = task["id"]
@@ -69,6 +109,32 @@ class TaskExecutor:
 
         # Determine task type from title prefix or source
         task_type = self._resolve_task_type(task)
+
+        # Approval gate check — skip if already approved
+        already_approved = False
+        if task.get("result"):
+            result_data = task["result"]
+            if isinstance(result_data, str):
+                import json
+                try:
+                    result_data = json.loads(result_data)
+                except Exception:
+                    result_data = {}
+            already_approved = isinstance(result_data, dict) and result_data.get("approved", False)
+
+        if self._needs_approval(task_type) and not already_approved:
+            logger.info(f"Task {task_id} requires approval: {title} (type={task_type})")
+            # Move back from running to pending_approval
+            await self.queue.hold_for_approval(task_id)
+            await self.db.log_action(
+                level=None, action_type="approval",
+                description=f"Awaiting approval: {title}",
+                status="completed",
+                details={"task_id": task_id, "task_type": task_type},
+            )
+            self._current_task = None
+            return
+
         handler = self._handlers.get(task_type)
 
         action_id = await self.db.log_action(
@@ -211,3 +277,35 @@ class TaskExecutor:
     async def _handle_echo(self, task: dict) -> dict:
         """Simple echo task for testing."""
         return {"echo": task["title"], "description": task.get("description", ""), "timestamp": time.time()}
+
+    async def _handle_hermes(self, task: dict) -> dict:
+        """Delegate task execution to Hermes Agent."""
+        if not self.hermes.is_available:
+            return {
+                "status": "skipped",
+                "note": "Hermes integration is disabled. Enable in config.json under 'hermes.enabled'.",
+            }
+
+        logger.info(f"Delegating task {task['id']} to Hermes Agent: {task['title']}")
+
+        result = await self.hermes.execute_task(task)
+
+        if result.success:
+            await self.db.log_action(
+                level=4, action_type="task_exec",
+                description=f"Hermes completed: {task['title']}",
+                status="completed",
+                details={
+                    "task_id": task["id"],
+                    "hermes_output": result.output[:500],
+                    "tool_calls": len(result.tool_calls),
+                },
+            )
+            return {
+                "status": "completed",
+                "executor": "hermes",
+                "output": result.output,
+                "tool_calls": result.tool_calls,
+            }
+        else:
+            raise RuntimeError(f"Hermes execution failed: {result.error}")

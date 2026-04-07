@@ -14,10 +14,15 @@ from pydantic import BaseModel
 from anah.config import load_config
 from anah.db import Database
 from anah.task_queue import TaskQueue
+from anah.hermes_bridge import HermesBridge, HermesConfig
 
 config = load_config()
 db = Database(config.daemon.db_path)
 queue: TaskQueue | None = None
+
+# Build Hermes bridge for health checks
+_hermes_cfg = HermesConfig(**config.hermes.model_dump()) if hasattr(config, 'hermes') else HermesConfig()
+hermes = HermesBridge(_hermes_cfg)
 
 
 class TaskCreate(BaseModel):
@@ -164,3 +169,38 @@ async def get_goal_stats():
             "from_patterns": r["from_patterns"] or 0,
         }
     return {"total": 0, "enacted": 0, "proposed": 0, "dismissed": 0, "from_llm": 0, "from_patterns": 0}
+
+
+# --- Task Approval Gate ---
+
+@app.post("/api/tasks/{task_id}/approve")
+async def approve_task(task_id: int):
+    """Approve a pending task for execution."""
+    ok = await queue.approve(task_id)
+    if ok:
+        return {"id": task_id, "status": "queued", "message": "Task approved and re-queued"}
+    return {"id": task_id, "status": "unchanged", "message": "Task not in pending_approval state"}
+
+
+@app.post("/api/tasks/{task_id}/reject")
+async def reject_task(task_id: int):
+    """Reject a pending task."""
+    ok = await queue.reject(task_id)
+    if ok:
+        return {"id": task_id, "status": "failed", "message": "Task rejected"}
+    return {"id": task_id, "status": "unchanged", "message": "Task not in pending_approval state"}
+
+
+# --- Hermes Integration ---
+
+@app.get("/api/hermes/status")
+async def hermes_status():
+    """Check Hermes Agent availability."""
+    health = await hermes.health_check()
+    return {
+        "enabled": config.hermes.enabled if hasattr(config, 'hermes') else False,
+        "health": health,
+        "approval_required": "hermes" in (
+            config.approval_gate.require_approval if hasattr(config, 'approval_gate') else []
+        ),
+    }

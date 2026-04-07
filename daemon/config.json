@@ -19,5 +19,20 @@
   "notifications": {
     "enabled": false,
     "webhook_url": null
+  },
+  "hermes": {
+    "enabled": false,
+    "mode": "api",
+    "api_url": "http://localhost:11434/v1",
+    "api_key": "",
+    "model": "hermes",
+    "hermes_path": "hermes",
+    "timeout": 120,
+    "task_types": ["hermes"]
+  },
+  "approval_gate": {
+    "enabled": true,
+    "require_approval": ["hermes"],
+    "auto_approve": ["health_report", "self_diagnostic", "cleanup", "echo"]
   }
 }

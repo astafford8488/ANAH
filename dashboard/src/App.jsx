@@ -38,6 +38,7 @@ const STATUS_COLORS = {
 };
 
 const TASK_STATUS_COLORS = {
+  pending_approval: COLORS.purple,
   queued: COLORS.amber,
   running: COLORS.accent,
   completed: COLORS.green,
@@ -301,7 +302,7 @@ function HealthLog({ logs }) {
   );
 }
 
-function TaskQueuePanel({ tasks, taskStats, onSubmitTask }) {
+function TaskQueuePanel({ tasks, taskStats, onSubmitTask, onApprove, onReject }) {
   const [newTitle, setNewTitle] = useState("");
   const [newPriority, setNewPriority] = useState(0);
 
@@ -317,8 +318,9 @@ function TaskQueuePanel({ tasks, taskStats, onSubmitTask }) {
     <div>
       {/* Task Stats Summary */}
       {taskStats && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px", marginBottom: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "10px", marginBottom: "20px" }}>
           {[
+            { label: "Awaiting Approval", value: taskStats.pending_approval || 0, color: COLORS.purple },
             { label: "Queued", value: taskStats.queued, color: COLORS.amber },
             { label: "Running", value: taskStats.running, color: COLORS.accent },
             { label: "Completed", value: taskStats.completed, color: COLORS.green },
@@ -426,7 +428,7 @@ function TaskQueuePanel({ tasks, taskStats, onSubmitTask }) {
                     textAlign: "center", textTransform: "uppercase",
                     fontFamily: "'JetBrains Mono', monospace",
                   }}>
-                    {task.status}
+                    {task.status === "pending_approval" ? "PENDING" : task.status}
                   </span>
                   <div style={{ overflow: "hidden" }}>
                     <div style={{ color: COLORS.text, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -441,8 +443,32 @@ function TaskQueuePanel({ tasks, taskStats, onSubmitTask }) {
                   <span style={{
                     fontSize: "11px", fontFamily: "'JetBrains Mono', monospace",
                     color: COLORS.textMuted, textAlign: "right",
+                    display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "4px",
                   }}>
-                    {duration || (task.status === "running" ? "running..." : task.source)}
+                    {task.status === "pending_approval" && onApprove && onReject ? (
+                      <>
+                        <button
+                          onClick={() => onApprove(task.id)}
+                          style={{
+                            fontSize: "9px", fontWeight: 700, cursor: "pointer",
+                            background: `${COLORS.green}22`, color: COLORS.green,
+                            border: `1px solid ${COLORS.green}44`, borderRadius: "3px",
+                            padding: "2px 6px", fontFamily: "'JetBrains Mono', monospace",
+                          }}
+                        >APPROVE</button>
+                        <button
+                          onClick={() => onReject(task.id)}
+                          style={{
+                            fontSize: "9px", fontWeight: 700, cursor: "pointer",
+                            background: `${COLORS.red}22`, color: COLORS.red,
+                            border: `1px solid ${COLORS.red}44`, borderRadius: "3px",
+                            padding: "2px 6px", fontFamily: "'JetBrains Mono', monospace",
+                          }}
+                        >REJECT</button>
+                      </>
+                    ) : (
+                      duration || (task.status === "running" ? "running..." : task.source)
+                    )}
                   </span>
                 </div>
               );
@@ -628,6 +654,24 @@ export default function App() {
     }
   };
 
+  const handleApproveTask = async (taskId) => {
+    try {
+      await fetch(`${API_BASE}/tasks/${taskId}/approve`, { method: "POST" });
+      refetchTasks();
+    } catch (e) {
+      console.error("Failed to approve task:", e);
+    }
+  };
+
+  const handleRejectTask = async (taskId) => {
+    try {
+      await fetch(`${API_BASE}/tasks/${taskId}/reject`, { method: "POST" });
+      refetchTasks();
+    } catch (e) {
+      console.error("Failed to reject task:", e);
+    }
+  };
+
   const handleSubmitTask = async (title, priority) => {
     try {
       await fetch(`${API_BASE}/tasks`, {
@@ -708,12 +752,13 @@ export default function App() {
             }}
           >
             {tab.label}
-            {tab.id === "tasks" && taskStats && taskStats.queued > 0 && (
+            {tab.id === "tasks" && taskStats && (taskStats.queued > 0 || (taskStats.pending_approval || 0) > 0) && (
               <span style={{
                 marginLeft: "6px", fontSize: "10px", fontWeight: 700,
-                background: COLORS.amber, color: COLORS.bg,
+                background: (taskStats.pending_approval || 0) > 0 ? COLORS.purple : COLORS.amber,
+                color: COLORS.bg,
                 padding: "1px 6px", borderRadius: "8px",
-              }}>{taskStats.queued}</span>
+              }}>{(taskStats.pending_approval || 0) > 0 ? `${taskStats.pending_approval} pending` : taskStats.queued}</span>
             )}
           </button>
         ))}
@@ -749,6 +794,8 @@ export default function App() {
             tasks={tasksData?.tasks}
             taskStats={taskStats}
             onSubmitTask={handleSubmitTask}
+            onApprove={handleApproveTask}
+            onReject={handleRejectTask}
           />
         )}
 

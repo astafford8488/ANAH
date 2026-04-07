@@ -36,12 +36,31 @@ class NotificationsConfig(BaseModel):
     webhook_url: str | None = None
 
 
+class HermesConfig(BaseModel):
+    enabled: bool = False
+    mode: str = "api"  # "api" or "rpc"
+    api_url: str = "http://localhost:11434/v1"
+    api_key: str = ""
+    model: str = "hermes"
+    hermes_path: str = "hermes"
+    timeout: int = 120
+    task_types: list[str] = ["hermes"]
+
+
+class ApprovalGateConfig(BaseModel):
+    enabled: bool = True
+    require_approval: list[str] = ["hermes"]  # Task types needing human approval
+    auto_approve: list[str] = ["health_report", "self_diagnostic", "cleanup", "echo"]  # Always auto-approved
+
+
 class AnahConfig(BaseModel):
     daemon: DaemonConfig = DaemonConfig()
     intervals: IntervalsConfig = IntervalsConfig()
     thresholds: ThresholdsConfig = ThresholdsConfig()
     integrations: list[IntegrationEndpoint] = []
     notifications: NotificationsConfig = NotificationsConfig()
+    hermes: HermesConfig = HermesConfig()
+    approval_gate: ApprovalGateConfig = ApprovalGateConfig()
 
 
 def load_config(config_path: str = "config.json") -> AnahConfig:

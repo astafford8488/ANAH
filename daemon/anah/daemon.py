@@ -11,6 +11,7 @@ from anah.config import AnahConfig
 from anah.db import Database
 from anah.task_queue import TaskQueue
 from anah.executor import TaskExecutor
+from anah.hermes_bridge import HermesConfig
 from anah.checks import l1_survival, l2_state, l3_ecosystem, l4_performance, l5_goal_generation
 
 logger = logging.getLogger("anah.daemon")
@@ -34,7 +35,27 @@ class AnahDaemon:
         logger.info("ANAH Daemon starting...")
         await self.db.connect()
         self.queue = TaskQueue(self.db)
-        self.executor = TaskExecutor(self.db, self.queue)
+
+        # Build Hermes config from main config
+        hermes_cfg = None
+        if hasattr(self.config, 'hermes'):
+            h = self.config.hermes
+            hermes_cfg = HermesConfig(
+                enabled=h.enabled, mode=h.mode, api_url=h.api_url,
+                api_key=h.api_key, model=h.model, hermes_path=h.hermes_path,
+                timeout=h.timeout, task_types=h.task_types,
+            )
+
+        # Build approval gate config
+        approval_cfg = None
+        if hasattr(self.config, 'approval_gate'):
+            approval_cfg = self.config.approval_gate.model_dump()
+
+        self.executor = TaskExecutor(
+            self.db, self.queue,
+            hermes_config=hermes_cfg,
+            approval_config=approval_cfg,
+        )
         self.running = True
 
         await self.db.log_action(None, "lifecycle", "Daemon started (Phase 3 — Full Loop)", "completed")

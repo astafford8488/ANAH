@@ -66,6 +66,47 @@ class TaskQueue:
         )
         await self.db._db.commit()
 
+    async def hold_for_approval(self, task_id: int):
+        """Move a task to pending_approval status (from queued or running)."""
+        await self.db._db.execute(
+            "UPDATE task_queue SET status = 'pending_approval', started_at = NULL WHERE id = ? AND status IN ('queued', 'running')",
+            (task_id,),
+        )
+        await self.db._db.commit()
+
+    async def approve(self, task_id: int) -> bool:
+        """Approve a pending task — moves it back to queued with approval flag."""
+        cursor = await self.db._db.execute(
+            "UPDATE task_queue SET status = 'queued', result = ? WHERE id = ? AND status = 'pending_approval'",
+            (json.dumps({"approved": True}), task_id),
+        )
+        await self.db._db.commit()
+        changed = cursor.rowcount > 0
+        if changed:
+            await self.db.log_action(
+                level=None, action_type="approval",
+                description=f"Task #{task_id} approved by user",
+                status="completed",
+            )
+        return changed
+
+    async def reject(self, task_id: int, reason: str = "Rejected by user") -> bool:
+        """Reject a pending task — marks it as failed."""
+        now = time.time()
+        cursor = await self.db._db.execute(
+            "UPDATE task_queue SET status = 'failed', completed_at = ?, result = ? WHERE id = ? AND status = 'pending_approval'",
+            (now, json.dumps({"error": reason}), task_id),
+        )
+        await self.db._db.commit()
+        changed = cursor.rowcount > 0
+        if changed:
+            await self.db.log_action(
+                level=None, action_type="approval",
+                description=f"Task #{task_id} rejected: {reason}",
+                status="completed",
+            )
+        return changed
+
     async def fail(self, task_id: int, error: str):
         """Mark a task as failed."""
         now = time.time()
@@ -79,12 +120,12 @@ class TaskQueue:
         """Get tasks from the queue."""
         if include_done:
             cursor = await self.db._db.execute(
-                "SELECT * FROM task_queue ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, priority DESC, created_at DESC LIMIT ?",
+                "SELECT * FROM task_queue ORDER BY CASE status WHEN 'pending_approval' THEN 0 WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END, priority DESC, created_at DESC LIMIT ?",
                 (limit,),
             )
         else:
             cursor = await self.db._db.execute(
-                "SELECT * FROM task_queue WHERE status IN ('queued', 'running') ORDER BY priority DESC, created_at ASC LIMIT ?",
+                "SELECT * FROM task_queue WHERE status IN ('queued', 'running', 'pending_approval') ORDER BY CASE status WHEN 'pending_approval' THEN 0 ELSE 1 END, priority DESC, created_at ASC LIMIT ?",
                 (limit,),
             )
         rows = await cursor.fetchall()
@@ -107,7 +148,7 @@ class TaskQueue:
             FROM task_queue GROUP BY status"""
         )
         rows = await cursor.fetchall()
-        stats = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "avg_duration_ms": 0}
+        stats = {"queued": 0, "running": 0, "completed": 0, "failed": 0, "pending_approval": 0, "avg_duration_ms": 0}
         total_duration = 0
         duration_count = 0
         for r in rows:
