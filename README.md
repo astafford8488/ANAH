@@ -78,20 +78,35 @@ anah/
 └── dashboard/           # React real-time monitoring UI
 ```
 
-## Quick Start
+## Prerequisites
+
+- **Python 3.11+** (for the daemon)
+- **Node.js 18+** (for the React dashboard)
+- **pip** or **uv** for Python package management
+
+## Getting Started
 
 ```bash
+# Clone the repository
+git clone https://github.com/astafford8488/ANAH.git
+cd ANAH
+
+# Set up environment
+cp .env.example .env
+# Edit .env and add your ANTHROPIC_API_KEY (required for L5 goal generation)
+
 # Start the daemon
 cd daemon
 pip install -e .
 anah start
 
-# Start the dashboard
+# Start the dashboard (in a separate terminal)
 cd dashboard
 npm install && npm run dev
 ```
 
+The daemon will begin running L1-L5 checks immediately. The dashboard connects via WebSocket and displays real-time status of all levels.
+
 ## License
 
 MIT
-</div>
